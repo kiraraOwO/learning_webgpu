@@ -1,0 +1,215 @@
+<!doctype html>
+
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>WebGPU Life</title>
+  </head>
+  <body>
+    <button id="change2red">red</button>
+    <button id="change2green">green</button>
+    <button id="change2blue">blue</button>
+    <br>
+    <canvas width="512" height="512"></canvas>
+    <script type="module">
+        const canvas = document.querySelector("canvas");
+        if (!navigator.gpu) {
+            throw new Error("WebGPU not supported on this browser.");
+        }
+
+        // 如果找不到合适的适配器，返回的 adapter 值可能是 null
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            throw new Error("No appropriate GPUAdapter found.");
+        }
+
+        // 获取设备，该方法也会返回一个 promise
+        // Promise 对象是 JavaScript 的异步操作解决方案，为异步操作提供统一接口
+        const device = await adapter.requestDevice();
+
+        // 配置画布
+        const context = canvas.getContext("webgpu"); // 绘图方式为webgpu
+        const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
+        context.configure({
+            device: device,
+            format: canvasFormat,
+        }); // 将返回的context 关联到设备
+
+        // 更改画布内容
+        const encoder = device.createCommandEncoder();
+
+        // 使用 encoder 启动渲染通道
+        const pass = encoder.beginRenderPass({
+            colorAttachments: [{
+                // context.getCurrentTexture() 从您之前创建的画布上下文中获取纹理
+                view: context.getCurrentTexture().createView(),
+                loadOp: "clear", // 在渲染通道开始时清除纹理
+                storeOp: "store", // 在渲染通道完成后 将渲染通道期间完成的所有绘制结果保存到纹理
+            }]
+        });
+
+        // **最后添加**
+        // pass.setPipeline(cellPipeline);
+        // pass.setVertexBuffer(0, vertexBuffer);
+        // pass.draw(vertices.length / 2); // 6 vertices
+        // **最后添加**
+
+        // 通过在 beginRenderPass() 之后立即添加以下调用来结束渲染通道
+        pass.end();
+        // 需要注意的是，仅仅进行这些调用并不会使 GPU 实际执行任何操作。它们只是记录供 GPU 稍后执行的命令。
+
+        // 调用 encoder.finish() 会结束记录并生成一个 commandBuffer
+        const commandBuffer = encoder.finish();
+        // 提交缓冲
+        device.queue.submit([commandBuffer]);
+
+        document.getElementById("change2red").addEventListener("click", () => {
+            const encoder = device.createCommandEncoder();
+
+            const pass = encoder.beginRenderPass({
+                colorAttachments: [{
+                    view: context.getCurrentTexture().createView(),
+                    loadOp: "clear",
+                    clearValue: { r: 1, g: 0, b: 0, a: 1 },
+                    storeOp: "store", 
+                }]
+            });
+            pass.end();
+            const commandBuffer = encoder.finish();
+            device.queue.submit([commandBuffer]);
+        });
+
+        document.getElementById("change2green").addEventListener("click", () => {
+            const encoder = device.createCommandEncoder();
+
+            const pass = encoder.beginRenderPass({
+                colorAttachments: [{
+                    view: context.getCurrentTexture().createView(),
+                    loadOp: "clear",
+                    clearValue: { r: 0, g: 0.3, b: 0, a: 1 },
+                    storeOp: "store", 
+                }]
+            });
+            pass.end();
+            const commandBuffer = encoder.finish();
+            device.queue.submit([commandBuffer]);
+        });
+        
+        document.getElementById("change2blue").addEventListener("click", () => {
+            const encoder = device.createCommandEncoder();
+
+            const pass = encoder.beginRenderPass({
+                colorAttachments: [{
+                    view: context.getCurrentTexture().createView(),
+                    loadOp: "clear",
+                    clearValue: { r: 0, g: 0, b: 0.4, a: 1 },
+                    storeOp: "store", 
+                }]
+            });
+            pass.end();
+            const commandBuffer = encoder.finish();
+            device.queue.submit([commandBuffer]);
+        });
+
+        let vertices = new Float32Array([
+        //   X,    Y,
+            -0.8, -0.8,
+            0.8, -0.8,
+            0.8,  0.8,
+            -0.8,  0.8,
+        ]);
+
+        // GPU 以三角形的形式工作，必须以三个为一组提供顶点
+        vertices = new Float32Array([
+        //   X,    Y,
+            -0.8, -0.8, // Triangle 1 (Blue)
+            0.8, -0.8,
+            0.8,  0.8,
+
+            -0.8, -0.8, // Triangle 2 (Red)
+            0.8,  0.8,
+            -0.8,  0.8,
+        ]);
+
+        // 创建顶点缓冲区
+        const vertexBuffer = device.createBuffer({
+            label: "Cell vertices", // WebGPU 生成的错误消息中使用这些标签
+            size: vertices.byteLength, // 指定缓冲区的大小
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST, // 指定缓冲区的用法:顶点数据,将数据复制到其中
+        }); // 无法在创建 GPUBuffer 后调整大小,也无法更改用法标志,可以更改其内存的内容
+
+        // 将顶点数据复制到缓冲区的内存
+        device.queue.writeBuffer(vertexBuffer, /*bufferOffset=*/0, vertices);
+
+        // 定义顶点布局
+        // 使用 GPUVertexBufferLayout 字典定义顶点数据结构
+        const vertexBufferLayout = {
+            arrayStride: 8, // GPU 在查找下一个顶点时需要在缓冲区中向前跳过的字节数
+            // 一个顶点有两个 4 字节坐标，所以查找顶点时间隔是 8
+            attributes: [{
+                format: "float32x2", // 定义数据的 format。来自 GPUVertexFormat 类型列表
+                offset: 0,  // 仅当缓冲区中包含多个属性时才需要担心此问题
+                shaderLocation: 0, // Position, see vertex shader, 0 到 15 之间的任意数字
+            }],
+        };
+
+        // 着色器
+        const cellShaderModule = device.createShaderModule({
+            label: "Cell shader",
+            // 定义顶点着色器
+            // GPU 会针对 vertexBuffer 中的每个顶点调用该函数一次
+            // WGSL 中，顶点着色器函数可以随意命名，但它前面必须有 @vertex 属性，使用 fn 关键字表示函数
+            // 顶点着色器必须至少返回在裁剪空间中处理的顶点的最终位置，始终以四维矢量(vec4f)的形式指定
+            // -> 符号用于表示这是函数返回的内容
+            // 使用语法 vec4f(x, y, z, w) 构造要返回的新 vec4f
+            // 使用缓冲区中的数据，通过使用 @location() 属性以及vertexBufferLayout 中的参数来实现，
+            // 指定的 shaderLocation 为 0,因此在 WGSL 代码中，请使用 @location(0) 标记参数。
+            // 您还将格式定义为 float32x2，这是一个 2D 矢量，因此在 WGSL 中，参数为 vec2f -> @location(0) pos: vec2f
+            // 返回该位置,由于位置是 2D 矢量，而返回类型是 4D 矢量,将0,0改为pos.x和pos.y -> return vec4f(pos.x, pos.y, 0, 1);
+            // 可以用简写形式将位置矢量作为第一个参数传入 -> vec4f(pos, 0, 1);
+            //
+            // 定义 fragment 着色器
+            // 运行方式与顶点着色器非常相似，但不是为每个顶点调用，而是针对要绘制的每个像素调用 Fragment 着色器
+            // 始终在顶点着色器之后调用
+            // GPU 获取顶点着色器的输出并对其进行三角形处理，从而基于三个点的集合创建三角形
+            // 然后计算出每个三角形包含输出颜色附件的哪些像素，对每个三角形进行光栅化，针对每个像素调用一次 fragment 着色器,返回一种颜色
+            // 可以认为它们只是为每个三角形的每个像素返回一种颜色
+            // fragment 着色器函数由 @fragment 属性表示，也会返回 vec4f, 这种情况下，矢量表示颜色
+            // 需要为返回值提供 @location 属性
+            // 返回的矢量的四个组成部分是红色、绿色、蓝色和 Alpha 颜色值
+            code: `
+                @vertex
+                fn vertexMain(@location(0) pos: vec2f) -> 
+                    @builtin(position) vec4f {
+                    return vec4f(pos, 0, 1);
+                }
+
+                @fragment
+                fn fragmentMain() -> @location(0) vec4f {
+                    return vec4f(1, 0, 0, 1);
+                }
+            `
+            // 顶点和fragment可拆分
+        });
+
+        // 创建渲染管线
+        const cellPipeline = device.createRenderPipeline({
+            label: "Cell pipeline",
+            layout: "auto",
+            vertex: {
+                module: cellShaderModule, // 上文着色器定义
+                entryPoint: "vertexMain", // 着色器代码中为每个顶点调用的函数的名称
+                buffers: [vertexBufferLayout] // 上文定义的布局
+            },
+            fragment: {
+                module: cellShaderModule,
+                entryPoint: "fragmentMain",
+                targets: [{
+                    format: canvasFormat // 需要与使用此流水线的所有渲染通道的 colorAttachments 中提供的纹理一致
+                }]
+            }
+        });
+
+    </script>
+  </body>
+</html>
